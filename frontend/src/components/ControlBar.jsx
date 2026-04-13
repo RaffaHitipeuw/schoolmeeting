@@ -1,65 +1,38 @@
-import React, { useState, useRef } from "react";
+import React, { useState } from "react";
 
 export default function ControlBar({
   role,
   code,
   name,
   socket,
-  webrtc,
-  localVideoRef,
+  localStreamRef,
+  isScreenSharing,
+  onScreenShare,
   onLeave,
+  presence,
+  mySocketId,
 }) {
-  const [sharing, setSharing]   = useState(false);
   const [micMuted, setMicMuted] = useState(false);
-  const [camOff, setCamOff]     = useState(false);
-  const [handUp, setHandUp]     = useState(false);
-  const [copied, setCopied]     = useState(false);
+  const [camOff, setCamOff] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const [showParticipants, setShowParticipants] = useState(false);
 
-  
-  async function toggleScreenShare() {
-    if (!sharing) {
-      try {
-        const stream = await webrtc.startScreenShare();
-        if (localVideoRef.current) localVideoRef.current.srcObject = stream;
-        setSharing(true);
-      } catch (err) {
-        if (err.name !== "NotAllowedError") {
-          alert("Gagal screen share: " + err.message);
-        }
-      }
-    } else {
-      const stream = await webrtc.startCamera();
-      if (localVideoRef.current) localVideoRef.current.srcObject = stream;
-      setSharing(false);
-    }
-  }
-
-  
   function toggleMic() {
-    const stream = webrtc.localStreamRef?.current;
+    const stream = localStreamRef?.current;
     if (!stream) return;
     const next = !micMuted;
     stream.getAudioTracks().forEach((t) => (t.enabled = !next));
     setMicMuted(next);
   }
 
-  
   function toggleCamera() {
-    const stream = webrtc.localStreamRef?.current;
+    const stream = localStreamRef?.current;
     if (!stream) return;
     const next = !camOff;
     stream.getVideoTracks().forEach((t) => (t.enabled = !next));
     setCamOff(next);
   }
 
-  
-  function toggleHand() {
-    const raised = !handUp;
-    setHandUp(raised);
-    socket.emit("raise-hand", { code, name, raised });
-  }
-
-  
   function copyCode() {
     navigator.clipboard.writeText(code).then(() => {
       setCopied(true);
@@ -67,75 +40,101 @@ export default function ControlBar({
     });
   }
 
+  function muteAll() {
+    socket.emit("mute-all", { code });
+  }
+
+  function kickUser(targetId) {
+    socket.emit("kick-user", { code, targetId });
+    setShowParticipants(false);
+  }
+
+  const isHost = role === "host";
+  const others = presence.participants.filter((p) => p.id !== mySocketId && !p.isHost);
+
   return (
     <div style={s.bar}>
-      {}
       <div style={s.group}>
-        {role === "teacher" && (
+        <BarBtn
+          active={!micMuted}
+          activeIcon="🎙"
+          inactiveIcon="🔇"
+          activeLabel="Mic On"
+          inactiveLabel="Mic Off"
+          activeClass="btn-ghost"
+          inactiveClass="btn-danger"
+          onClick={toggleMic}
+        />
+        <BarBtn
+          active={!camOff}
+          activeIcon="📹"
+          inactiveIcon="📷"
+          activeLabel="Cam On"
+          inactiveLabel="Cam Off"
+          activeClass="btn-ghost"
+          inactiveClass="btn-danger"
+          onClick={toggleCamera}
+        />
+        <BarBtn
+          active={isScreenSharing}
+          activeIcon="⏹"
+          inactiveIcon="🖥"
+          activeLabel="Stop Share"
+          inactiveLabel="Share Layar"
+          activeClass="btn-success"
+          inactiveClass="btn-ghost"
+          onClick={onScreenShare}
+        />
+      </div>
+
+      <div style={s.center}>
+        <button className="btn-ghost" onClick={copyCode} style={s.copyBtn} title="Salin kode room">
+          <span style={s.codeLabel}>KODE:</span>
+          <span style={s.codeVal}>{code}</span>
+          <span>{copied ? "✅" : "📋"}</span>
+        </button>
+      </div>
+
+      <div style={s.group}>
+        {isHost && (
           <>
-            <BarBtn
-              active={!micMuted}
-              activeClass="btn-ghost"
-              inactiveClass="btn-danger"
-              onClick={toggleMic}
-              label={micMuted ? "🔇 Mic Off" : "🎙 Mic On"}
-              title={micMuted ? "Aktifkan mikrofon" : "Matikan mikrofon"}
-            />
-            <BarBtn
-              active={!camOff}
-              activeClass="btn-ghost"
-              inactiveClass="btn-danger"
-              onClick={toggleCamera}
-              label={camOff ? "📷 Cam Off" : "📹 Cam On"}
-              title={camOff ? "Aktifkan kamera" : "Matikan kamera"}
-            />
-            <BarBtn
-              active={sharing}
-              activeClass="btn-success"
-              inactiveClass="btn-ghost"
-              onClick={toggleScreenShare}
-              label={sharing ? "⏹ Stop Share" : "🖥 Share Layar"}
-              title={sharing ? "Hentikan screen share" : "Mulai screen share"}
-            />
+            <button className="btn-ghost" onClick={muteAll} title="Mute semua peserta" style={s.hostBtn}>
+              🔇 Mute All
+            </button>
+            <div style={{ position: "relative" }}>
+              <button
+                className="btn-ghost"
+                onClick={() => setShowParticipants((v) => !v)}
+                title="Kelola peserta"
+                style={s.hostBtn}
+              >
+                👥 Kelola ({presence.count})
+              </button>
+              {showParticipants && others.length > 0 && (
+                <div style={s.dropdown}>
+                  {others.map((p) => (
+                    <div key={p.id} style={s.dropItem}>
+                      <span style={s.dropName}>{p.name}</span>
+                      <button
+                        className="btn-danger"
+                        onClick={() => kickUser(p.id)}
+                        style={s.kickBtn}
+                      >
+                        Kick
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {showParticipants && others.length === 0 && (
+                <div style={s.dropdown}>
+                  <div style={s.dropEmpty}>Tidak ada peserta lain</div>
+                </div>
+              )}
+            </div>
           </>
         )}
-
-        {role === "student" && (
-          <BarBtn
-            active={handUp}
-            activeClass="btn-yellow"
-            inactiveClass="btn-ghost"
-            onClick={toggleHand}
-            label={handUp ? "✋ Turunkan Tangan" : "✋ Raise Hand"}
-            title={handUp ? "Turunkan tangan" : "Minta izin bicara"}
-          />
-        )}
-      </div>
-
-      {}
-      <div style={s.center}>
-        {role === "teacher" && (
-          <button
-            className="btn-ghost"
-            onClick={copyCode}
-            style={s.copyBtn}
-            title="Salin kode room"
-          >
-            <span style={s.copyLabel}>Kode Room:</span>
-            <span style={s.copyCode}>{code}</span>
-            <span style={s.copyIcon}>{copied ? "✅" : "📋"}</span>
-          </button>
-        )}
-      </div>
-
-      {}
-      <div style={s.group}>
-        <button
-          className="btn-danger"
-          onClick={onLeave}
-          style={{ padding: "9px 20px" }}
-          title="Keluar dari room"
-        >
+        <button className="btn-danger" onClick={onLeave} style={{ padding: "9px 20px" }} title="Keluar dari room">
           🚪 Keluar
         </button>
       </div>
@@ -143,48 +142,64 @@ export default function ControlBar({
   );
 }
 
-function BarBtn({ active, activeClass, inactiveClass, onClick, label, title }) {
+function BarBtn({ active, activeIcon, inactiveIcon, activeLabel, inactiveLabel, activeClass, inactiveClass, onClick }) {
   return (
     <button
       className={active ? activeClass : inactiveClass}
       onClick={onClick}
-      title={title}
       style={{ padding: "9px 14px" }}
     >
-      {label}
+      {active ? activeIcon : inactiveIcon}{" "}
+      {active ? activeLabel : inactiveLabel}
     </button>
   );
 }
 
 const s = {
   bar: {
-    display: "flex", alignItems: "center", justifyContent: "space-between",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
     gap: 12,
     padding: "10px 20px",
     background: "var(--surface)",
     borderTop: "1px solid var(--border)",
     flexShrink: 0,
+    position: "relative",
+    zIndex: 10,
   },
-  group: {
-    display: "flex", alignItems: "center", gap: 8,
-  },
-  center: {
-    flex: 1, display: "flex", justifyContent: "center",
-  },
+  group: { display: "flex", alignItems: "center", gap: 8 },
+  center: { flex: 1, display: "flex", justifyContent: "center" },
   copyBtn: {
-    display: "flex", alignItems: "center", gap: 8,
+    display: "flex",
+    alignItems: "center",
+    gap: 8,
     padding: "8px 16px",
     cursor: "pointer",
   },
-  copyLabel: {
-    fontSize: 11, color: "var(--text3)", fontWeight: 600,
-    textTransform: "uppercase", letterSpacing: "0.5px",
+  codeLabel: { fontSize: 10, color: "var(--text3)", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.5px" },
+  codeVal: { fontFamily: "var(--font-mono)", fontWeight: 700, fontSize: 15, color: "var(--accent)", letterSpacing: 4 },
+  hostBtn: { padding: "9px 14px" },
+  dropdown: {
+    position: "absolute",
+    bottom: "calc(100% + 8px)",
+    right: 0,
+    background: "var(--surface2)",
+    border: "1px solid var(--border2)",
+    borderRadius: "var(--radius)",
+    padding: 8,
+    minWidth: 220,
+    boxShadow: "var(--shadow-lg)",
+    zIndex: 100,
   },
-  copyCode: {
-    fontFamily: "var(--font-mono)",
-    fontWeight: 700, fontSize: 15,
-    color: "var(--accent)",
-    letterSpacing: 4,
+  dropItem: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    padding: "6px 8px",
+    gap: 10,
   },
-  copyIcon: { fontSize: 14 },
+  dropName: { fontSize: 13, color: "var(--text)", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" },
+  kickBtn: { padding: "4px 10px", fontSize: 12, flexShrink: 0 },
+  dropEmpty: { fontSize: 12, color: "var(--text3)", padding: "6px 8px", textAlign: "center" },
 };

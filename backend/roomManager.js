@@ -2,30 +2,29 @@ const { generateRoomCode } = require("./utils/generateId");
 
 const rooms = new Map();
 
+const MAX_PARTICIPANTS = 6;
 
-function createRoom(teacherSocketId, teacherName) {
+function createRoom(hostSocketId, hostName) {
   let code;
-
   do {
     code = generateRoomCode();
   } while (rooms.has(code));
 
   rooms.set(code, {
     code,
-    teacher: { id: teacherSocketId, name: teacherName },
-    students: new Map(),
+    host: { id: hostSocketId, name: hostName },
+    participants: new Map([[hostSocketId, { id: hostSocketId, name: hostName, isHost: true }]]),
     chat: [],
-    handRaised: new Set(),
     createdAt: Date.now(),
   });
   return code;
 }
 
-function joinRoom(code, studentSocketId, studentName) {
+function joinRoom(code, socketId, name) {
   const room = rooms.get(code);
   if (!room) return { error: "Room tidak ditemukan. Cek kodenya lagi ya." };
-  if (room.students.size >= 50) return { error: "Room sudah penuh (maks 50 siswa)." };
-  room.students.set(studentSocketId, studentName);
+  if (room.participants.size >= MAX_PARTICIPANTS) return { error: "Room sudah penuh (maks 6 orang)." };
+  room.participants.set(socketId, { id: socketId, name, isHost: false });
   return { room };
 }
 
@@ -35,26 +34,35 @@ function getRoom(code) {
 
 function getRoomBySocketId(socketId) {
   for (const room of rooms.values()) {
-    if (room.teacher?.id === socketId) return room;
-    if (room.students.has(socketId)) return room;
+    if (room.participants.has(socketId)) return room;
   }
   return null;
 }
 
 function removeParticipant(socketId) {
   for (const [code, room] of rooms) {
-    if (room.teacher?.id === socketId) {
-      rooms.delete(code);
-      return { code, closed: true };
-    }
-    if (room.students.has(socketId)) {
-      const name = room.students.get(socketId);
-      room.students.delete(socketId);
-      room.handRaised.delete(socketId);
-      return { code, closed: false, name };
+    if (room.participants.has(socketId)) {
+      const p = room.participants.get(socketId);
+      const wasHost = p.isHost;
+      room.participants.delete(socketId);
+      if (wasHost || room.participants.size === 0) {
+        rooms.delete(code);
+        return { code, closed: true, name: p.name };
+      }
+      return { code, closed: false, name: p.name };
     }
   }
   return null;
+}
+
+function kickParticipant(code, hostSocketId, targetSocketId) {
+  const room = rooms.get(code);
+  if (!room) return { error: "Room tidak ditemukan." };
+  if (room.host.id !== hostSocketId) return { error: "Hanya host yang bisa kick." };
+  if (!room.participants.has(targetSocketId)) return { error: "Peserta tidak ditemukan." };
+  const p = room.participants.get(targetSocketId);
+  room.participants.delete(targetSocketId);
+  return { ok: true, name: p.name };
 }
 
 function addChat(code, senderName, message) {
@@ -71,29 +79,13 @@ function addChat(code, senderName, message) {
   return entry;
 }
 
-
 function getPresence(room) {
-  return {
-    teacher: room.teacher?.name || null,
-    students: Array.from(room.students.values()),
-    count: 1 + room.students.size,
-  };
-}
-
-
-function setHandRaise(code, socketId, raised) {
-  const room = rooms.get(code);
-  if (!room) return false;
-  if (raised) room.handRaised.add(socketId);
-  else room.handRaised.delete(socketId);
-  return true;
-}
-
-function getHandRaisers(room) {
-  return Array.from(room.handRaised).map((sid) => ({
-    socketId: sid,
-    name: room.students.get(sid) || "?",
+  const list = Array.from(room.participants.values()).map((p) => ({
+    id: p.id,
+    name: p.name,
+    isHost: p.isHost,
   }));
+  return { participants: list, count: list.length };
 }
 
 module.exports = {
@@ -102,8 +94,7 @@ module.exports = {
   getRoom,
   getRoomBySocketId,
   removeParticipant,
+  kickParticipant,
   addChat,
   getPresence,
-  setHandRaise,
-  getHandRaisers,
 };

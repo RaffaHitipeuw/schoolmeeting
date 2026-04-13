@@ -17,28 +17,26 @@ function registerHandlers(io, socket) {
     if (result.error) return cb({ error: result.error });
 
     const room = result.room;
-    socket.join(code);
+    socket.join(code.trim().toUpperCase());
 
     const presence = rm.getPresence(room);
+    const existingPeers = Array.from(room.participants.keys()).filter((id) => id !== socket.id);
+
     cb({
       ok: true,
       presence,
       chat: room.chat,
-      teacherSocketId: room.teacher?.id || null,
+      existingPeers,
     });
 
-    socket.to(code).emit("presence-update", presence);
+    socket.to(code.trim().toUpperCase()).emit("presence-update", presence);
+    socket.to(code.trim().toUpperCase()).emit("peer-joined", {
+      socketId: socket.id,
+      name: name.trim(),
+    });
 
-    if (room.teacher && room.teacher.id !== socket.id) {
-      io.to(room.teacher.id).emit("student-joined", {
-        studentSocketId: socket.id,
-        name: name.trim(),
-      });
-    }
-
-    console.log(`[room:join] ${name} → ${code}`);
+    console.log(`[room:join] ${name} -> ${code}`);
   });
-
 
   socket.on("webrtc-offer", ({ targetId, offer }) => {
     io.to(targetId).emit("webrtc-offer", { fromId: socket.id, offer });
@@ -58,17 +56,27 @@ function registerHandlers(io, socket) {
     if (entry) io.to(code).emit("chat-message", entry);
   });
 
-  socket.on("raise-hand", ({ code, name, raised }) => {
+  socket.on("mute-all", ({ code }) => {
     const room = rm.getRoom(code);
-    if (!room) return;
-    rm.setHandRaise(code, socket.id, raised);
-    if (room.teacher) {
-      io.to(room.teacher.id).emit("hand-update", {
-        socketId: socket.id,
-        name,
-        raised,
-      });
+    if (!room || room.host.id !== socket.id) return;
+    socket.to(code).emit("force-mute");
+  });
+
+  socket.on("kick-user", ({ code, targetId }) => {
+    const result = rm.kickParticipant(code, socket.id, targetId);
+    if (result.error) return;
+    io.to(targetId).emit("you-were-kicked");
+    const room = rm.getRoom(code);
+    if (room) {
+      const presence = rm.getPresence(room);
+      io.to(code).emit("presence-update", presence);
+      io.to(code).emit("peer-left", { socketId: targetId });
     }
+    console.log(`[room:kick] ${result.name} from ${code}`);
+  });
+
+  socket.on("speaking", ({ code, speaking }) => {
+    socket.to(code).emit("peer-speaking", { socketId: socket.id, speaking });
   });
 
   socket.on("disconnect", () => {
@@ -77,16 +85,14 @@ function registerHandlers(io, socket) {
     if (!result) return;
 
     if (result.closed) {
-      io.to(result.code).emit("room-closed", { reason: "Guru telah menutup room." });
+      io.to(result.code).emit("room-closed", { reason: "Host telah menutup room." });
       console.log(`[room:closed] ${result.code}`);
     } else {
       const room = rm.getRoom(result.code);
       if (room) {
         const presence = rm.getPresence(room);
         io.to(result.code).emit("presence-update", presence);
-        if (room.teacher) {
-          io.to(room.teacher.id).emit("student-left", { studentSocketId: socket.id });
-        }
+        io.to(result.code).emit("peer-left", { socketId: socket.id });
       }
       console.log(`[room:leave] ${result.name} from ${result.code}`);
     }

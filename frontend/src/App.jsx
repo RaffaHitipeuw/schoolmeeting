@@ -3,7 +3,7 @@ import { RoomProvider } from "./context/RoomContext";
 import AppRoutes from "./routes/AppRoutes";
 
 export default function App() {
-  const [page, setPage] = useState("lobby"); 
+  const [page, setPage] = useState("lobby");
 
   return (
     <RoomProvider>

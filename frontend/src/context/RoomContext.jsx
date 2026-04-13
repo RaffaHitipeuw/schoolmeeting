@@ -5,18 +5,17 @@ const RoomCtx = createContext(null);
 const INITIAL_STATE = {
   code: null,
   name: "",
-  role: null,            
-  teacherSocketId: null,
-  presence: { teacher: null, students: [], count: 0 },
+  mySocketId: null,
+  role: null,
+  presence: { participants: [], count: 0 },
   chat: [],
-  handRaisers: [],       
+  existingPeers: [],
   connected: false,
 };
 
 export function RoomProvider({ children }) {
   const [room, setRoom] = useState(INITIAL_STATE);
 
-  
   const update = useCallback((patch) => {
     setRoom((prev) =>
       typeof patch === "function"
